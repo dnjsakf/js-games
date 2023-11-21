@@ -1,16 +1,15 @@
-class Job {
-  constructor(){
-    this.state = {}
-  }
-}
+/******************************************
+ * Temps
+ ******************************************/
+class Job { }
 class Adventurer extends Job { }
 class Warrior extends Job { }
+class Item { }
 
-class Item {
-  constructor(){
-  }
-}
 
+/******************************************
+ * Utils
+ ******************************************/
 class StateObject {
   constructor(obj={}){
     this.value = obj;
@@ -53,6 +52,8 @@ class StateObject {
               }
               return prevObj[crnt];
             });
+          } else {
+            obj[key] = value;
           }
         } else if( Object instanceof key?.constructor ){
           Object.assign(obj, key);
@@ -95,13 +96,59 @@ class StateUtil {
     }
     return obj;
   }
+
+  static genUuid(size, prefix){
+    const codes = ((new Array(10).fill(0).map((code, idx)=>(code+idx)).join("")) // Numbers
+    + (new Array(26).fill(97).map((code, idx)=>(String.fromCharCode(code+idx))).join("") // Uppers
+    + (new Array(26).fill(65).map((code, idx)=>(String.fromCharCode(code+idx))).join("")))); // Lowers
+
+    if( !size || size <= 0 ){
+      size = 32;
+    }
+    if( typeof prefix === "string" ){
+      size -= (prefix.length);
+      if( size <= 0 ){
+        size = 0;
+      }
+      if( prefix.length > size ){
+        prefix = prefix.substring(0, size);
+      }
+    } else {
+      prefix = "";
+    }
+    const uuid = new Array(size).fill(0).map((code, idx)=>{
+      const rnd = parseInt(Math.random(codes.length)*codes.length);
+      return codes[rnd];
+    }).join("");
+
+    return prefix+uuid;
+  }
 }
 
+class DrawUtil {
+  constructor(ctx){
+    this.ctx = ctx;
+  }
+
+  fillCricle(x1, y1, radius, color){
+    this.ctx.beginPath();
+    this.ctx.arc(x1+radius, y1+radius, radius, 0, Math.PI * 2, 0);
+    this.ctx.fillStyle = color;
+    this.ctx.fill();
+  }
+}
+
+
+/******************************************
+ * Player
+ ******************************************/
 class Player extends StateUtil {
   constructor(props={}){
-    const state = Object.assign({}, {
-      _id: null,
-      username: props.username,
+    super({
+      uuid: StateUtil.genUuid(32, "PLAYER_"),
+      username: "Temp",
+      ...props,
+    }, {
       stat: {
         level: 1,
         exp: 0,
@@ -118,12 +165,22 @@ class Player extends StateUtil {
         accessory: null,
         potion: null,
       },
+      offset: {
+        x: 0,
+        y: 0,
+        ...props.offset,
+      },
+      field: null,
       settings: {
         maxLevel: 30,
       },
     });
-    super(props, state);
   }
+
+  init(){
+    
+  }
+
   attack(target){
     let isKilled = false;
     if( target instanceof Player ){
@@ -134,6 +191,7 @@ class Player extends StateUtil {
     }
     return isKilled;
   }
+
   hitted(damage=0, target){
     let isDead = false;
     let health = this.getState("stat.health");
@@ -144,12 +202,33 @@ class Player extends StateUtil {
     this.setState("stat.health", health);
     return isDead;
   }
+
   died(){
     this.setState("stat.health", 0);
     return true;
   }
-  levelUp(){}
+
+  levelUp(){
+    this.setState("stat", {
+      level: this.state.level + 1,
+    });
+  }
+
   incExp(){}
+
+  // move(vector){ // vector: ["UP", "DOWN", "LEFT", "RIGHT"]
+
+  // }
+
+  setField(field){
+    const { x, y } = field.state.offset;
+    this.setState("field", field);
+    this.setState("offset", { x, y });
+  }
+
+  setOffset(x, y){
+    this.setState("offset", { x, y });
+  }
 }
 
 class User extends Player {
@@ -171,6 +250,9 @@ class Enermy extends Player {
 }
 
 
+/******************************************
+ * Field
+ ******************************************/
 class Field extends StateUtil {
   constructor(props={}){
     const width = (props.size?.width || 50);
@@ -182,13 +264,22 @@ class Field extends StateUtil {
         width: width,
         height: height,
       },
-      col: props.col || 0,
-      row: props.row || 0,
       pos: {
         p1: { x:  0, y:  0 },
         p2: { x: width, y:  0 },
         p3: { x: width, y: height },
         p4: { x:  0, y: height },
+      },
+      offset: {
+        x: 0,
+        y: 0,
+        ...props.offset,
+      },
+      link: {
+        UP: null,
+        DOWN: null,
+        LEFT: null,
+        RIGHT: null,
       },
       settings: {
         adjustPos: {
@@ -203,8 +294,16 @@ class Field extends StateUtil {
 
   setPos(p1, p2, p3, p4){
     this.setState({
-      pos: { p1, p2, p3, p4 }
+      "pos": { p1, p2, p3, p4 }
     });
+  }
+
+  setOffset(x, y){
+    this.setState("offset", { x, y });
+  }
+
+  setLink(UP, DOWN, LEFT, RIGHT){
+    this.setState("link", { UP, DOWN, LEFT, RIGHT });
   }
 
   get type(){
@@ -248,6 +347,10 @@ class Goal extends Field {
   }
 }
 
+
+/******************************************
+ * Ctronller
+ ******************************************/
 class Controller extends StateUtil {
 
   constructor(props={}){
@@ -298,24 +401,51 @@ class Controller extends StateUtil {
           ACTION: vector === "ACTION",
         });
       };
-      document.addEventListener("keydown", window.controllerHandler);
       events.push({
         event: "keydown",
         handler: window.controllerHandler,
         target: document,
+        beforeUnbind: ()=>{
+          return true;
+        },
+        onUnbind: ()=>{
+          window.controllerHandler = null;
+        },
       });
     }
+
+    events?.forEach(({ event, handler, target, onBind, beforeBind })=>{
+      let doBind = true;
+      if( typeof beforeBind === 'function' ){
+        doBind = !(beforeBind() === false);
+      }
+      if( doBind ){
+        target.addEventListener(event, handler);
+        if( typeof onBind === 'function' ){
+          onBind();
+        }
+      }
+    });
+
+    this.setState("events", events);
   }
 
   unbindEvents(){
     const events = this.state.events;
-    // if( window.controllerHandler ){
-    //   document.removeEventListener("keydown", window.controllerHandler);
-    //   window.controllerHandler = null;
-    // }
-    events?.forEach(({ event, handler, target })=>{
-      target.removeEventListener(event, handler);
+    events?.forEach(({ event, handler, target, onUnbind, beforeUnbind })=>{
+      let doUnbind = true;
+      if( typeof beforeUnbind === 'function' ){
+        doUnbind = !(beforeUnbind() === false);
+      }
+      if( doUnbind ){
+        target.removeEventListener(event, handler);
+        if( typeof onUnbind === 'function' ){
+          onUnbind();
+        }
+      }
     });
+
+    this.setState("events", []);
   }
   
   getKeyMap(){
@@ -356,11 +486,18 @@ class Controller extends StateUtil {
   }
 }
 
+/******************************************
+ * Stage
+ ******************************************/
 class Stage extends StateUtil {
   constructor(props={}){
     const state = Object.assign({}, {
       insts: {
         canvas: props.canvas,
+        roads: [],
+        goals: [],
+        walls: [],
+        spawners: [],
       },
       status: {
         level: 1,
@@ -383,6 +520,7 @@ class Stage extends StateUtil {
     });
     super(props, state);
 
+    this.drawer = new DrawUtil(state.insts.canvas.getContext("2d"));
     this.getCanvas = () => ( state.insts.canvas );
     this.getContext = () => ( state.insts.canvas.getContext("2d") );
   }
@@ -396,19 +534,36 @@ class Stage extends StateUtil {
   }
   
   init(){
+    // -> Making Stage
     this.makeMatrix();
-
+    this.makeMatrixLink();
+    // <- Making Stage
+    // -> Setting Canvas Size
     const { width, height } = this.getState("maps");
     const canvas = this.getCanvas();
     canvas.width = width;
     canvas.height = height;
-
-    this.drawMatrix();
-    this.bindEvents();
+    // <- Setting Canvas Size
+    // -> Setting Player Offset
+    const users = this.getProps("users", []);
+    const spawners = this.getState("insts.spawners", []).slice();
+    users?.forEach((user)=>{
+      const spawn = spawners.shift();
+      if( spawn ){
+        const { x, y } = spawn.getState("offset");
+        user.setField(spawn);
+        user.setOffset(x, y);
+      }
+    });
+    // <- Setting Player Offset
+    // -> Drawing Stage
+    // this.drawMatrix();
+    // this.drawPlayers();
+    // <- Drawing Stage
   }
 
   makeMatrix(){
-    const fields = [];
+    const matrix = [];
     const roads = [];
     const goals = [];
     const walls = [];
@@ -428,8 +583,10 @@ class Stage extends StateUtil {
       for(let cIdx=0; cIdx<cols; cIdx++){
         const fieldConfig = {
           index: mIdx,
-          row: rIdx,
-          col: cIdx,
+          offset: {
+            x: cIdx,
+            y: rIdx,
+          },
           size: {
             width: fieldSize?.at(0),
             height: fieldSize?.at(1),
@@ -451,7 +608,7 @@ class Stage extends StateUtil {
         }
         const size = col.getState("size");
         // const adjustX = (colArr.length)+1;
-        // const adjustY = (fields.length)+1;
+        // const adjustY = (matrix.length)+1;
         const colWidth = (size.width);
         const colHeight = (size.height);
 
@@ -484,18 +641,62 @@ class Stage extends StateUtil {
           height += colHeight;
         }
       }
-      fields.push(colArr);
+      matrix.push(colArr);
     }
-    this.setState("maps.matrix", fields);
+
+    this.setState("maps.matrix", matrix);
     this.setState("maps.width", width);
     this.setState("maps.height", height);
+
+    this.setState("insts.spawners", spawners);
+    this.setState("insts.goals", goals);
+    this.setState("insts.walls", walls);
+    this.setState("insts.roads", roads);
     
-    return fields;
+    return matrix;
+  }
+
+  makeMatrixLink(){
+    // 각 Field 간의 연결 처리
+    const matrix = this.makeMatrix();
+    const [rows, cols] = this.getState("maps.size");
+    const MAX_X = (cols - 1);
+    const MAX_Y = (rows - 1);
+    matrix.reduce((prev, crnt)=>([].concat(prev, crnt))).forEach((field)=>{
+      const { x, y } = field.state.offset;
+      
+      let UP = null;
+      let DOWN = null;
+      let LEFT = null;
+      let RIGHT = null;
+
+      let x1 = x;
+      let y1 = y;
+      if( x > 0 ){ // LEFT
+        x1 = x - 1;
+        LEFT = matrix[y][x1];
+      }
+      if( x < MAX_X ){ // RIGHT
+        x1 = x + 1;
+        RIGHT = matrix[y][x1];
+      }
+      if( y > 0 ){ // UP
+        y1 = y - 1;
+        UP = matrix[y1][x];
+      }
+      if( y < MAX_Y ){ // DOWN
+        y1 = y + 1;
+        DOWN = matrix[y1][x];
+      }
+
+      field.setLink(UP, DOWN, LEFT, RIGHT);
+    });
   }
 
   drawMatrix(){
     const ctx = this.getContext();
     const matrix = this.makeMatrix();
+    const drawType = this.getProps("drawType", "fill");
     matrix.reduce((prev, crnt)=>([].concat(prev, crnt))).forEach((field)=>{
       const type = field.getProps("type");
       const index = field.getState("index");
@@ -518,8 +719,11 @@ class Stage extends StateUtil {
         ctx.strokeStyle = "#0000ff";
       }
       ctx.rect(p1.x, p1.y, width, height);
-      // ctx.fill();
-      ctx.stroke();
+      if( drawType === "stroke" ){
+        ctx.stroke();
+      } else {
+        ctx.fill();
+      }
       if( showNumber ){
         const fontSize = ( width / 2 );
         ctx.font = `${fontSize}px Arial`;
@@ -530,15 +734,26 @@ class Stage extends StateUtil {
     });
   }
 
-  bindEvents(){
-    const canvas = this.getCanvas();
-    if( this.isMobile ){
+  drawPlayers(){
+    const ctx = this.getContext();
+    const users = this.getProps("users", []);
+    const spawners = this.getState("insts.spawners", []).slice();
+    users?.forEach((user)=>{
+      const field = user.state.field;
+      const type = field.getProps("type");
+      const index = field.getState("index");
+      const { width, height } = field.getState("size");
+      const { p1, p2, p3, p4 } = field.getState("pos");
+      this.drawer.fillCricle(p1.x, p1.y, width/2, "#ff0000");
+    });
+  }
 
-    } else {
-      canvas.addEventListener("keydown", (e)=>{
-
-      });
-    }
+  draw(){
+    const ctx = this.getContext();
+    const { width, height } = this.getState("maps");
+    ctx.clearRect(0, 0, width, height);
+    this.drawMatrix();
+    this.drawPlayers();
   }
 }
 
@@ -567,8 +782,18 @@ class StageManager extends StateUtil {
 
   init(){
     const canvas = this.props.canvas;
+    const stages = [];
+    const users = [];
+
+    const u1 = new User({
+      username: "User1",
+    });
+    u1.init();
+    users.push(u1);
+    
     const s1 = new Stage({
       canvas: canvas,
+      drawType: "stroke",
       size: {
         maps: [10, 10],
         field: [20, 20],
@@ -583,22 +808,48 @@ class StageManager extends StateUtil {
         [1, 5], [3, 5],
         [1, 4], [3, 4], 
       ],
+      users: users,
     });
     s1.init();
+    stages.push(s1);
 
-    let controller = this.state.controller;
-    if( !controller ){
-      controller = new Controller({
+    let c1 = this.state.controller;
+    if( !c1 ){
+      c1 = new Controller({
         mode: "wasd",
         onKeyDown: (e, vector, vectors) => {
           e.preventDefault();
-          console.log(vector, vectors);
+          const prevField = u1.state.field;
+          const nextField = prevField.state.link[vector];
+          console.log(vector, nextField.state.offset)
+          if( nextField ){
+            u1.setField(nextField);
+          }
         },
       });
     }
-    controller.init();
+    c1.init();
 
-    this.setState("controller", controller);
+    this.setState("users", users);
+    this.setState("stages", stages);
+    this.setState("controller", c1);
+
+    this.render();
+  }
+
+  render(){
+    const self = this;
+    function drawer(){
+      const stages = self.state.stages;
+      stages?.forEach((stage)=>{
+        stage.draw();
+      });
+      const drawing = requestAnimationFrame(drawer);
+      self.setState("drawing", drawing);
+    }
+    cancelAnimationFrame(self.getState("drawing"));
+    self.setState("drawing", null);
+    drawer();
   }
 
   join(player, stage){
