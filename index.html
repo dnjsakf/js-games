@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
+<body>
+  <div id="body">
+    <canvas id="canvas-playground"></canvas>
+  </div>
+  <script src="./js/common.js"></script>
+  <script type="text/javascript">
+    const canvas = document.getElementById("canvas-playground");
+    const sm = new StageManager({
+      canvas: canvas,
+    });
+    sm.init();
+
+  </script>
+  <script type="text/javascript">
+    // const canvas = document.getElementById("canvas-playground");
+    // const s1 = new Stage({
+    //   canvas: canvas,
+    //   size: {
+    //     maps: [10, 10],
+    //     field: [20, 20],
+    //   },
+    //   goal: [
+    //     [9, 0],
+    //   ],
+    //   spawn: [
+    //     [0,5], [2,5], [5,5]
+    //   ],
+    //   wall: [
+    //     [1, 5], [3, 5],
+    //     [1, 4], [3, 4], 
+    //   ],
+    // });
+    // s1.init();
+    // const s1Matrix = s1.getState("maps.matrix");
+    // // const s1Matrix = s1.makeMatrix();
+
+    // const p1 = new Player();
+    // const p2 = new Player();
+
+    // p1.attack(p2);
+
+    // console.log({
+    //   "s1.matrix": s1Matrix.map((row)=>( row.map((col)=>( col.getState("pos" ))))),
+    //   "p1.health": p1.getState("stat.health"),
+    //   "p2.health": p2.getState("stat.health"),
+    // });
+
+    // const controller = new Controller({
+    //   mode: "arrow",
+    //   onKeyDown: (e, vector, vectors) => {
+    //     console.log(e, vector, vectors);
+    //   },
+    // });
+    // console.log(controller.getKeyMap());
+    // console.log(controller.compare(83));
+  </script>
+</body>
+</html>
