@@ -130,11 +130,67 @@ class DrawUtil {
     this.ctx = ctx;
   }
 
-  fillCricle(x1, y1, radius, color){
+  rect(x1, y1, width, height, style){
+    const { type, color, text, textColor } = style;
     this.ctx.beginPath();
-    this.ctx.arc(x1+radius, y1+radius, radius, 0, Math.PI * 2, 0);
-    this.ctx.fillStyle = color;
-    this.ctx.fill();
+    this.ctx.rect(x1, y1, width, height);
+    if( type === "stroke" ){
+      this.ctx.strokeStyle = color;
+      this.ctx.stroke();
+    } else {
+      this.ctx.fillStyle = color; 
+      this.ctx.fill();
+    }
+    if( text ){
+      // const fontSize = ( width / 2 );
+      const fontSize = ( width / 3 );
+      this.ctx.font = `${fontSize}px Arial`;
+      this.ctx.textAlign = "center";
+      if( textColor ){
+        this.ctx.fillStyle = textColor;
+      } else if( color ){
+        this.ctx.fillStyle = color;
+      } else {
+        this.ctx.fillStyle = "#000000";
+      }
+      this.ctx.fillText(text, x1+(width/2), y1+(height/2)+(fontSize/3));
+    }
+    this.ctx.closePath();
+  }
+
+  circle(x1, y1, radius, style){
+    const { type, color } = style;
+    this.ctx.beginPath();
+    // this.ctx.arc(x1+radius, y1+radius, radius, 0, Math.PI * 2, 0);
+    this.ctx.arc(x1, y1, radius, 0, Math.PI * 2, 0);
+    if( type === "stroke" ){
+      this.ctx.strokeStyle = color;
+      this.ctx.stroke();
+    } else {
+      this.ctx.fillStyle = color; 
+      this.ctx.fill();
+    }
+    this.ctx.closePath();
+  }
+
+  strokeRect(x1, y1, width, height, style){
+    style = Object.assign({}, style, { type: "stroke" });
+    this.rect(x1, y1, width, height, style);
+  }
+
+  strokeCircle(x1, y1, radius, style){
+    style = Object.assign({}, style, { type: "stroke" });
+    this.circle(x1, y1, radius, style);
+  }
+
+  fillRect(x1, y1, width, height, style){
+    style = Object.assign({}, style, { type: "fill" });
+    this.rect(x1, y1, width, height, style);
+  }
+
+  fillCircle(x1, y1, radius, style){
+    style = Object.assign({}, style, { type: "fill" });
+    this.circle(x1, y1, radius, style);
   }
 }
 
@@ -157,6 +213,7 @@ class Player extends StateUtil {
         limit: {
           exp: 100,
         },
+        point: 100,
       },
       inventory: [],
       equipment: {
@@ -168,20 +225,43 @@ class Player extends StateUtil {
       offset: {
         x: 0,
         y: 0,
-        ...props.offset,
       },
-      field: null,
+      aim: {
+        vector: "UP",
+        pos: { x: 0, y: 0 },
+        offset: { x: 0, y: 0 }, 
+        size: { width: 5, height: 5 },
+      },
+      field: null, // Field Object
       settings: {
         maxLevel: 30,
       },
     });
   }
 
-  init(){
-    
+  setOffset(x, y){
+    this.setState("offset", { x, y });
   }
 
+  setField(field){
+    this.setState("field", field);
+    if( field instanceof Field ){
+      field.standOn(this);
+    }
+  }
+
+  get target(){
+    const vector = this.state.aim.vector;
+    const targetField = this.state.field.state.link[vector];
+    return targetField;
+  }
+
+  init(){}
+
   attack(target){
+    if( !target ){
+      target = this.target.state.stand;
+    }
     let isKilled = false;
     if( target instanceof Player ){
       const damage = this.getState("stat.strength");
@@ -189,46 +269,81 @@ class Player extends StateUtil {
         isKilled = target.hitted(damage);
       }
     }
+    if( isKilled ){
+      const { point } = target.state.stat;
+      console.log(point);
+    }
+    console.log("attack", target, isKilled);
     return isKilled;
   }
 
   hitted(damage=0, target){
+    console.log("hitted", damage);
     let isDead = false;
     let health = this.getState("stat.health");
     let armour = this.getState("equipment.armour", 0);
     if( armour > 0 ){ damage -= armour; }
     if( damage > 0 ){ health -= damage; }
     if( health <= 0 ){ health = 0; isDead = true; }
+    
     this.setState("stat.health", health);
+
+    if( isDead ){
+      this.died();
+    }
     return isDead;
   }
 
   died(){
+    const field = this.state.field;
+    if( field instanceof Field ){
+      field.leave();
+    }
     this.setState("stat.health", 0);
     return true;
   }
 
   levelUp(){
-    this.setState("stat", {
-      level: this.state.level + 1,
-    });
+    this.setState("stat.level", this.state.level + 1);
   }
 
   incExp(){}
 
-  // move(vector){ // vector: ["UP", "DOWN", "LEFT", "RIGHT"]
+  rotate(vector="UP"){
+    const field = this.state.field;
+    if( field instanceof Field ){
+      const aimPos = this.getState("aim.pos", { x: 0, y: 0 });
 
-  // }
+      const { p1 } = field.state.pos;
+      const { width, height } = field.state.size;
 
-  setField(field){
-    const { x, y } = field.state.offset;
-    this.setState("field", field);
-    this.setState("offset", { x, y });
+      const widthRadius = parseInt(width/2);
+      const heightRadius = parseInt(height/2);
+
+      switch(vector){
+        case "UP":
+          aimPos.x = ( p1.x + widthRadius );
+          aimPos.y = ( p1.y );
+          break;
+        case "DOWN":
+          aimPos.x = ( p1.x + widthRadius );
+          aimPos.y = ( p1.y + height );
+          break;
+        case "LEFT":
+          aimPos.x = ( p1.x );
+          aimPos.y = ( p1.y + heightRadius );
+          break;
+        case "RIGHT":
+          aimPos.x = ( p1.x + width );
+          aimPos.y = ( p1.y + heightRadius );
+          break;
+      }
+      this.setState("aim.pos", aimPos);
+    }
+    this.setState("aim.vector", vector);
   }
 
-  setOffset(x, y){
-    this.setState("offset", { x, y });
-  }
+  move(vector="UP"){}
 }
 
 class User extends Player {
@@ -238,6 +353,31 @@ class User extends Player {
       type: "user",
     });
   }
+
+  move(vector="UP"){
+    const crntField = this.state.field;
+    const nextField = crntField.state.link[vector];
+    if( nextField instanceof Wall ) {
+      this.rotate(vector);
+      return false;
+    } else if( nextField instanceof Field ){
+      const nextFieldHasStand = nextField.state.stand;
+      if( nextFieldHasStand ){
+        return false;
+      }
+
+      const { x, y } = nextField.state.offset;
+      this.setState("field", nextField);
+      this.setState("offset", { x, y });
+
+      crntField.leave();
+      nextField.standOn(this);
+    }
+    
+    this.rotate(vector);
+
+    return true;
+  }
 }
 
 class Enermy extends Player {
@@ -245,7 +385,18 @@ class Enermy extends Player {
     super({
       ...props,
       type: "enermy",
+    }, {
+      target: null, // User Object
     });
+  }
+
+  move(){
+    const target = this.state.target;
+    if( target instanceof User ){
+      const field = this.state.field;
+      const userField = target.getState("field");
+
+    }
   }
 }
 
@@ -281,6 +432,7 @@ class Field extends StateUtil {
         LEFT: null,
         RIGHT: null,
       },
+      stand: null,
       settings: {
         adjustPos: {
           x: 0,
@@ -293,9 +445,7 @@ class Field extends StateUtil {
   }
 
   setPos(p1, p2, p3, p4){
-    this.setState({
-      "pos": { p1, p2, p3, p4 }
-    });
+    this.setState("pos", { p1, p2, p3, p4 });
   }
 
   setOffset(x, y){
@@ -304,6 +454,14 @@ class Field extends StateUtil {
 
   setLink(UP, DOWN, LEFT, RIGHT){
     this.setState("link", { UP, DOWN, LEFT, RIGHT });
+  }
+
+  standOn(target){
+    this.setState("stand", target);
+  }
+
+  leave(){
+    this.setState("stand", null);
   }
 
   get type(){
@@ -343,6 +501,15 @@ class Goal extends Field {
     super({
       ...props,
       type: "goal",
+    });
+  }
+}
+
+class Portal extends Field {
+  constructor(props={}){
+    super({
+      ...props,
+      type: "portal",
     });
   }
 }
@@ -497,6 +664,7 @@ class Stage extends StateUtil {
         roads: [],
         goals: [],
         walls: [],
+        portals: [],
         spawners: [],
       },
       status: {
@@ -553,6 +721,7 @@ class Stage extends StateUtil {
         const { x, y } = spawn.getState("offset");
         user.setField(spawn);
         user.setOffset(x, y);
+        user.rotate("UP")
       }
     });
     // <- Setting Player Offset
@@ -567,12 +736,14 @@ class Stage extends StateUtil {
     const roads = [];
     const goals = [];
     const walls = [];
+    const portals = [];
     const spawners = [];
 
     const fieldSize = this.getProps("size.field");
     const goal = this.getProps("goal", []);
     const spawn = this.getProps("spawn", []);
     const wall = this.getProps("wall", []);
+    const portal = this.getProps("portal", []);
     const [rows, cols] = this.getState("maps.size");
 
     let width = 0;
@@ -602,6 +773,9 @@ class Stage extends StateUtil {
         } else if( wall.some(([x, y])=>( x === cIdx && y === rIdx )) ){
           col = new Wall(fieldConfig);
           walls.push(col);
+        } else if( portal.some(([x, y])=>( x === cIdx && y === rIdx )) ){
+          col = new Portal(fieldConfig);
+          portals.push(col);
         } else {
           col = new Road(fieldConfig);
           roads.push(col);
@@ -664,88 +838,161 @@ class Stage extends StateUtil {
     const MAX_Y = (rows - 1);
     matrix.reduce((prev, crnt)=>([].concat(prev, crnt))).forEach((field)=>{
       const { x, y } = field.state.offset;
+
+      let x1 = x;
+      let y1 = y;
       
       let UP = null;
       let DOWN = null;
       let LEFT = null;
       let RIGHT = null;
 
-      let x1 = x;
-      let y1 = y;
+      // -> LEFT
       if( x > 0 ){ // LEFT
         x1 = x - 1;
-        LEFT = matrix[y][x1];
+      } else if ( field instanceof Portal ){
+        x1 = MAX_X;
       }
-      if( x < MAX_X ){ // RIGHT
+      LEFT = matrix[y][x1];
+      // <- LEFT
+      // -> RIGHT
+      if( x < MAX_X ){
         x1 = x + 1;
-        RIGHT = matrix[y][x1];
+      } else if ( field instanceof Portal ){
+        x1 = 0
       }
+      RIGHT = matrix[y][x1];
+      // <- RIGHT
+      // -> UP
       if( y > 0 ){ // UP
         y1 = y - 1;
-        UP = matrix[y1][x];
+      } else if ( field instanceof Portal ){
+        y1 = MAX_Y;
       }
+      UP = matrix[y1][x];
+      // <- UP
+      // -> DOWN
       if( y < MAX_Y ){ // DOWN
         y1 = y + 1;
-        DOWN = matrix[y1][x];
+      } else if ( field instanceof Portal ){
+        y1 = 0;
       }
+      DOWN = matrix[y1][x];
+      // <- DOWN
 
       field.setLink(UP, DOWN, LEFT, RIGHT);
     });
   }
 
   drawMatrix(){
-    const ctx = this.getContext();
     const matrix = this.makeMatrix();
-    const drawType = this.getProps("drawType", "fill");
     matrix.reduce((prev, crnt)=>([].concat(prev, crnt))).forEach((field)=>{
       const type = field.getProps("type");
       const index = field.getState("index");
       const { width, height } = field.getState("size");
       const { p1, p2, p3, p4 } = field.getState("pos");
+      const { x, y } = field.getState("offset");
       const { showNumber } = field.getState("settings");
 
-      ctx.beginPath();
+      const style = {
+        type: "stroke",
+        color: "#0000ff",
+        text: null,
+        textColor: null,
+      }
+
       if( type === "goal" ){ // field instanceof Goal
-        ctx.fillStyle = "#ffff00";
-        ctx.strokeStyle = "#ffff00";
+        style.type = "fill";
+        style.color = "#ffff00";
       } else if( type === "spawn" ){ // field instanceof Spawn
-        ctx.fillStyle = "#ff0000";
-        ctx.strokeStyle = "#ff0000";
+        style.type = "fill";
+        style.color = "#cccccc";
+      } else if( type === "portal" ){ // field instanceof Portal
+        style.type = "fill";
+        style.color = "#ff00ff";
       } else if( type === "wall" ){ // field instanceof Wall
-        ctx.fillStyle = "#00ff00";
-        ctx.strokeStyle = "#00ff00";
+        style.type = "fill";
+        style.color = "#333333";
       } else { // field instanceof Road
-        ctx.fillStyle = "#0000ff";
-        ctx.strokeStyle = "#0000ff";
+        // style.color = "#0000ff";
+        style.color = "#bbbbbb";
       }
-      ctx.rect(p1.x, p1.y, width, height);
-      if( drawType === "stroke" ){
-        ctx.stroke();
-      } else {
-        ctx.fill();
-      }
+
       if( showNumber ){
-        const fontSize = ( width / 2 );
-        ctx.font = `${fontSize}px Arial`;
-        ctx.textAlign = "center";
-        ctx.fillText(index, p1.x+(width/2), p1.y+(height/2)+(fontSize/3));
+        // style.text = String(index);
+        style.text = String(`(${x},${y})`)
       }
-      ctx.closePath();
+
+      this.drawer.rect(p1.x, p1.y, width, height, style);
     });
   }
 
   drawPlayers(){
-    const ctx = this.getContext();
     const users = this.getProps("users", []);
-    const spawners = this.getState("insts.spawners", []).slice();
     users?.forEach((user)=>{
       const field = user.state.field;
-      const type = field.getProps("type");
-      const index = field.getState("index");
-      const { width, height } = field.getState("size");
-      const { p1, p2, p3, p4 } = field.getState("pos");
-      this.drawer.fillCricle(p1.x, p1.y, width/2, "#ff0000");
+      const { health } = user.state.stat;
+      if( health <= 0 ){
+        return false;
+      }
+      
+      /**
+       * Drawing User
+       */
+      const { width } = field.getState("size");
+      const { x: posX, y: posY } = field.getState("pos.p1");
+
+      const widthRadius = parseInt(width/2);
+
+      if( user instanceof User ){
+        this.drawer.circle(posX + widthRadius, posY + widthRadius, widthRadius, {
+          type: "fill",
+          color: "#ffff00",
+        });
+      } else {
+        this.drawer.circle(posX + widthRadius, posY + widthRadius, widthRadius, {
+          type: "fill",
+          color: "#2020ff",
+        });
+      }
+
+      /**
+       * Drawing Aim
+       */
+      const aim = user.state.aim;
+      let { x: aimX, y: aimY } = aim.pos;
+      const aimWidthRadius = parseInt(aim.size.width/2);
+      const aimHeightRadius = parseInt(aim.size.height/2);
+      let aimRadius = aimWidthRadius;
+
+      switch(aim.vector){
+        case "UP":
+          aimY += aimHeightRadius;
+          aimRadius = aimHeightRadius;
+          break;
+        case "DOWN":
+          aimY -= aimHeightRadius;
+          aimRadius = aimHeightRadius;
+          break;
+        case "LEFT":
+          aimX += aimWidthRadius;
+          aimRadius = aimWidthRadius;
+          break;
+        case "RIGHT":
+          aimX -= aimWidthRadius;
+          aimRadius = aimWidthRadius;
+          break;
+      }
+
+      this.drawer.circle(aimX, aimY, aimRadius, {
+        type: "fill",
+        color: "#ff0000"
+      });
     });
+  }
+
+  drawAim(){
+    
   }
 
   draw(){
@@ -768,6 +1015,10 @@ class StageManager extends StateUtil {
     super({
       ...props,
       canvas,
+      size: {
+        maps: [11, 11],
+        field: [30, 30],
+      }
     }, {
       stage: null, // Stage
       users: [],
@@ -781,6 +1032,7 @@ class StageManager extends StateUtil {
   }
 
   init(){
+    const size = this.props.size;
     const canvas = this.props.canvas;
     const stages = [];
     const users = [];
@@ -790,40 +1042,80 @@ class StageManager extends StateUtil {
     });
     u1.init();
     users.push(u1);
+
+    const e1 = new Enermy();
+    e1.init();
+    users.push(e1);
+
+    const e2 = new Enermy();
+    e2.init();
+    users.push(e2);
     
     const s1 = new Stage({
       canvas: canvas,
-      drawType: "stroke",
-      size: {
-        maps: [10, 10],
-        field: [20, 20],
-      },
+      size: size,
       goal: [
-        [9, 0],
+        // [9, 0],
       ],
       spawn: [
-        [0,5], [2,5], [5,5]
+        [2,3], [4,5], [5,5], [6,5],
+      ],
+      portal: [
+        [0, 3], [0, 7],
+        [2, 0], [2, 10],
+        [8, 0], [8, 10],
+        [10, 3], [10, 7],
       ],
       wall: [
-        [1, 5], [3, 5],
-        [1, 4], [3, 4], 
+        [0, 2], [0, 4], [0, 6], [0, 8], 
+        [1, 0], [1, 1], [1, 2], [1, 4], [1, 5], [1, 6], [1, 8], [1, 9], [1, 10], 
+        [3, 0], [3, 1], [3, 2], [3, 4], [3, 5], [3, 6], [3, 8], [3, 9], [3, 10],
+        [4, 2], [4, 6], [4, 4], [4, 8], 
+        [5, 2], [5, 6], [5, 8],
+        [6, 2], [6, 4], [6, 6], [6, 8], 
+        [7, 0], [7, 1], [7, 2], [7, 4], [7, 5], [7, 6], [7, 8], [7, 9], [7, 10],
+        [9, 0], [9, 1], [9, 2], [9, 4], [9, 5], [9, 6], [9, 8], [9, 9], [9, 10], 
+        [10, 2], [10, 4], [10, 6], [10, 8], 
       ],
       users: users,
     });
     s1.init();
     stages.push(s1);
 
+    // 키 입력 이벤트 설정
     let c1 = this.state.controller;
     if( !c1 ){
       c1 = new Controller({
         mode: "wasd",
         onKeyDown: (e, vector, vectors) => {
           e.preventDefault();
+          if( vector === "UNKNOWN" ){
+            return false;
+          }
+
+          if( vector === "ACTION" ){
+            u1.attack();
+            return false;
+          }
+
+          // 방향만 전환
+          const prevVector = u1.state.aim.vector;
+          if( prevVector !== vector ){ // 바로 이동을 원하는 경우, 설정으로 처리
+            u1.rotate(vector);
+            return false;
+          }
+
+          // 이동
+          u1.move(vector);
+          return false;
+          
           const prevField = u1.state.field;
           const nextField = prevField.state.link[vector];
-          console.log(vector, nextField.state.offset)
           if( nextField ){
-            u1.setField(nextField);
+            if( nextField instanceof Wall ){
+              return false;
+            }
+            u1.move(nextField, vector);
           }
         },
       });
