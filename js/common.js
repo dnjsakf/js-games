@@ -192,6 +192,62 @@ class DrawUtil {
     style = Object.assign({}, style, { type: "fill" });
     this.circle(x1, y1, radius, style);
   }
+
+  // 두 점 사이의 거리
+  static getDistance(x1, y1, x2, y2){
+    // 거리의 제곱 = 밑변의 제곱 + 높이의 제곱
+    // 거리 = 루트(밑변의 제곱 + 높이의 제곱)
+    return Math.sqrt(Math.pow((x2 - x1),2)+Math.pow((y2 - y1),2));
+  }
+
+  // 두 점 사이의 각도
+  static getAngle(x1, y1, x2, y2, rotate){
+    return (Math.atan2((y2 - y1), (x2 - x1)) * (180/Math.PI)) + (rotate||0);
+  }
+
+  // 사분면
+  static getQuadrant(angle){
+    if( Math.abs(angle) <= 90 ){
+      if( angle >= 0 ){  // 4사분면
+        return 4;
+      } else { // 1사분면
+        return 1;
+      }
+    } else if( Math.abs(angle) <= 180  ){ // 3사분면
+      if( angle >= 0 ){  // 3사분면
+        return 3;
+      } else { // 2사분면
+        return 2;
+      }
+    }
+    return 0;
+  }
+
+  // 특정 각도로 특정 길이만큼 이동했을 때 좌표
+  static getMovePos(range, angle, x1, y1){
+    const vectorX = (range * Math.cos(angle*(Math.PI/180)));
+    const vectorY = (range * Math.sin(angle*(Math.PI/180)));
+    return {
+      x: x1 + vectorX,
+      y: y1 + vectorY,
+      vectorX: vectorX,
+      vectorY: vectorY,
+      left: vectorX < 0,
+      right: vectorX > 0,
+      up: vectorY < 0,
+      down: vectorY > 0,
+    }
+  }
+
+  // 회전시키기
+  static setRotate(rotate, width, x1, y1, x2, y2){
+    const angle = StageUtil.getAngle(x1, y1, x2, y2, rotate); // 각도
+    const dist = StageUtil.getDistance(x1, y1, x1+(width/2), y1+(width/2)); // 거리
+    return {
+      x: x1 + (dist * Math.cos((angle * Math.PI/180))),
+      y: y1 + (dist * Math.sin((angle * Math.PI/180))),
+    }
+  }
 }
 
 
@@ -199,7 +255,7 @@ class DrawUtil {
  * Player
  ******************************************/
 class Player extends StateUtil {
-  constructor(props={}){
+  constructor(props={}, state={}){
     super({
       uuid: StateUtil.genUuid(32, "PLAYER_"),
       username: "Temp",
@@ -236,6 +292,7 @@ class Player extends StateUtil {
       settings: {
         maxLevel: 30,
       },
+      ...state,
     });
   }
 
@@ -344,6 +401,79 @@ class Player extends StateUtil {
   }
 
   move(vector="UP"){}
+
+  findTarget(target){
+    if( target instanceof Player ){
+      const playerField = this.state.field;
+      const targetField = target.state.field;
+
+      const { x: x1, y: y1 } = playerField.state.offset;
+      const { x: x2, y: y2 } = targetField.state.offset;
+
+      const dist = DrawUtil.getDistance(x1, y1, x2, y2);
+      const angle = DrawUtil.getAngle(x1, y1, x2, y2);
+      const quad = DrawUtil.getQuadrant(angle);
+
+      let vector = this.state.aim.vector;
+      switch(quad){
+        case 1: // 1 사분면
+          vector = ( angle <= -45 ? "UP" : "RIGHT" );
+          break;
+        case 2: // 2 사분면
+          vector = ( angle >= -135 ? "UP" : "LEFT" );
+          break;
+        case 3: // 3 사분면
+          vector = ( angle <= 135 ? "DOWN" : "LEFT" );
+          break;
+        case 4: // 4 사분면
+          vector = ( angle >= 45 ? "DOWN" : "RIGHT" );
+          break;
+      }
+
+      let linkedNode = null;
+      const history = [];
+      const visits = [];
+
+      // BFS
+      // const queue = [targetField];
+      // while(queue.length > 0){
+      //   const node = queue.shift(); // 맨 앞에서 가져오기
+      //   visits.push(node); // 방문 기록 남기기
+      //   for(let i=0; i<node.linked.length; i++){
+      //     linkedNode = node.linked[i];
+      //     if( !visits.some((node)=>(node === linkedNode)) ){
+      //       queue.push(linkedNode);
+      //       history.push(linkedNode);
+      //     }
+      //   }
+      // }
+
+      // DFS
+      // function search(node){
+      //   let path = [node];
+      //   for(let i=0; i<node.linked.length; i++){
+      //     const linkedNode = node.linked[i];
+      //     if( !path.some((node)=>(node === linkedNode)) ){
+      //       if( linkedNode.props.uuid === playerField.props.uuid ){
+      //         return path;
+      //       } else {
+      //         // path.push(...search(linkedNode));
+      //       }
+      //     }
+      //   }
+      //   return path;
+      // }
+      // const linkedPath = search(targetField);
+      // console.log(linkedPath?.map((field)=>(field.state.offset)));
+      // console.log(linkedPath?.map((field)=>(field.state.offset)));
+      // console.log(history.length, visits.length);
+
+      return {
+        vector,
+        field: linkedNode,
+      };
+    }
+  }
 }
 
 class User extends Player {
@@ -386,17 +516,33 @@ class Enermy extends Player {
       ...props,
       type: "enermy",
     }, {
-      target: null, // User Object
+      target: (props.target||[]).slice().shift(), // User Object
     });
   }
 
   move(){
-    const target = this.state.target;
-    if( target instanceof User ){
-      const field = this.state.field;
-      const userField = target.getState("field");
+    const target = this.state.target; 
+    const { vector, field: nextField } = this.findTarget(target);
 
+    const crntField = this.state.field;
+    if( nextField instanceof Wall ) {
+      this.rotate(vector);
+      return false;
+    } else if( nextField instanceof Field ){
+      const nextFieldHasStand = nextField.state.stand;
+      if( nextFieldHasStand ){
+        return false;
+      }
+
+      const { x, y } = nextField.state.offset;
+      this.setState("field", nextField);
+      this.setState("offset", { x, y });
+
+      crntField.leave();
+      nextField.standOn(this);
     }
+
+    this.rotate(vector);
   }
 }
 
@@ -441,7 +587,10 @@ class Field extends StateUtil {
         showNumber: true,
       },
     });
-    super(props, state);
+    super({
+      ...props,
+      uuid: StateUtil.genUuid(),
+    }, state);
   }
 
   setPos(p1, p2, p3, p4){
@@ -462,6 +611,18 @@ class Field extends StateUtil {
 
   leave(){
     this.setState("stand", null);
+  }
+
+  get linked(){
+    const links = [];
+    const link = this.state.link;
+    Object.keys(link).forEach((key)=>{
+      const linked = link[key];
+      if( linked?.props.type !== "wall" ){
+        links.push(linked);
+      }
+    });
+    return links;
   }
 
   get type(){
@@ -707,28 +868,40 @@ class Stage extends StateUtil {
     this.makeMatrixLink();
     // <- Making Stage
     // -> Setting Canvas Size
-    const { width, height } = this.getState("maps");
-    const canvas = this.getCanvas();
-    canvas.width = width;
-    canvas.height = height;
+    this.resizeCanvas();
     // <- Setting Canvas Size
-    // -> Setting Player Offset
-    const users = this.getProps("users", []);
-    const spawners = this.getState("insts.spawners", []).slice();
-    users?.forEach((user)=>{
-      const spawn = spawners.shift();
-      if( spawn ){
-        const { x, y } = spawn.getState("offset");
-        user.setField(spawn);
-        user.setOffset(x, y);
-        user.rotate("UP")
-      }
-    });
-    // <- Setting Player Offset
+    // -> Spawning Player Offset
+    this.spawnPlayers();
+    // <- Spawning Player Offset
     // -> Drawing Stage
     // this.drawMatrix();
     // this.drawPlayers();
     // <- Drawing Stage
+  }
+
+  spawnPlayers(){
+    const spawners = this.getState("insts.spawners", []).slice();
+
+    const users = this.getProps("users", []);
+    const enermies = this.getProps("enermies", []);
+    const players = [].concat(users, enermies);
+
+    players?.forEach((player)=>{
+      const spawn = spawners.shift();
+      if( spawn ){
+        const { x, y } = spawn.getState("offset");
+        player.setField(spawn);
+        player.setOffset(x, y);
+        player.rotate("UP")
+      }
+    });
+  }
+
+  resizeCanvas(){
+    const { width, height } = this.getState("maps");
+    const canvas = this.getCanvas();
+    canvas.width = width;
+    canvas.height = height;
   }
 
   makeMatrix(){
@@ -763,6 +936,7 @@ class Stage extends StateUtil {
             height: fieldSize?.at(1),
           },
         }
+
         let col = null;
         if( goal.some(([x, y])=>( x === cIdx && y === rIdx )) ){
           col = new Goal(fieldConfig);
@@ -929,9 +1103,13 @@ class Stage extends StateUtil {
 
   drawPlayers(){
     const users = this.getProps("users", []);
-    users?.forEach((user)=>{
-      const field = user.state.field;
-      const { health } = user.state.stat;
+    const enermies = this.getProps("enermies", []);
+    const players = [].concat(users, enermies);
+
+    // -> Draw User
+    players?.forEach((player)=>{
+      const field = player.state.field;
+      const { health } = player.state.stat;
       if( health <= 0 ){
         return false;
       }
@@ -944,7 +1122,7 @@ class Stage extends StateUtil {
 
       const widthRadius = parseInt(width/2);
 
-      if( user instanceof User ){
+      if( player instanceof User ){
         this.drawer.circle(posX + widthRadius, posY + widthRadius, widthRadius, {
           type: "fill",
           color: "#ffff00",
@@ -959,7 +1137,7 @@ class Stage extends StateUtil {
       /**
        * Drawing Aim
        */
-      const aim = user.state.aim;
+      const aim = player.state.aim;
       let { x: aimX, y: aimY } = aim.pos;
       const aimWidthRadius = parseInt(aim.size.width/2);
       const aimHeightRadius = parseInt(aim.size.height/2);
@@ -989,10 +1167,7 @@ class Stage extends StateUtil {
         color: "#ff0000"
       });
     });
-  }
-
-  drawAim(){
-    
+    // <- Draw User
   }
 
   draw(){
@@ -1017,7 +1192,7 @@ class StageManager extends StateUtil {
       canvas,
       size: {
         maps: [11, 11],
-        field: [30, 30],
+        field: [50, 50], /** @TODO 숫자로 입력 받도록 처리 */
       }
     }, {
       stage: null, // Stage
@@ -1036,6 +1211,7 @@ class StageManager extends StateUtil {
     const canvas = this.props.canvas;
     const stages = [];
     const users = [];
+    const enermies = [];
 
     const u1 = new User({
       username: "User1",
@@ -1043,13 +1219,17 @@ class StageManager extends StateUtil {
     u1.init();
     users.push(u1);
 
-    const e1 = new Enermy();
+    const e1 = new Enermy({
+      target: users,
+    });
     e1.init();
-    users.push(e1);
+    enermies.push(e1);
 
-    const e2 = new Enermy();
-    e2.init();
-    users.push(e2);
+    // const e2 = new Enermy({
+    //   target: users,
+    // });
+    // e2.init();
+    // enermies.push(e2);
     
     const s1 = new Stage({
       canvas: canvas,
@@ -1078,6 +1258,7 @@ class StageManager extends StateUtil {
         [10, 2], [10, 4], [10, 6], [10, 8], 
       ],
       users: users,
+      enermies: enermies,
     });
     s1.init();
     stages.push(s1);
@@ -1105,8 +1286,11 @@ class StageManager extends StateUtil {
             return false;
           }
 
-          // 이동
+          // 플레이어 이동
           u1.move(vector);
+
+          // 적 이동
+          enermies.forEach((p)=>(p.move()));
           return false;
           
           const prevField = u1.state.field;
