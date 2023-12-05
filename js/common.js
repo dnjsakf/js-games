@@ -159,7 +159,7 @@ class DrawUtil {
   }
 
   circle(x1, y1, radius, style){
-    const { type, color } = style;
+    const { type, color, text, textColor } = style;
     this.ctx.beginPath();
     // this.ctx.arc(x1+radius, y1+radius, radius, 0, Math.PI * 2, 0);
     this.ctx.arc(x1, y1, radius, 0, Math.PI * 2, 0);
@@ -169,6 +169,20 @@ class DrawUtil {
     } else {
       this.ctx.fillStyle = color; 
       this.ctx.fill();
+    }
+    if( text ){
+      const fontSize = ( radius / 2 );
+      // const fontSize = ( radius / 3 );
+      this.ctx.font = `${fontSize}px Arial`;
+      this.ctx.textAlign = "center";
+      if( textColor ){
+        this.ctx.fillStyle = textColor;
+      } else if( color ){
+        this.ctx.fillStyle = color;
+      } else {
+        this.ctx.fillStyle = "#000000";
+      }
+      this.ctx.fillText(text, x1, y1+(fontSize/3));
     }
     this.ctx.closePath();
   }
@@ -430,47 +444,45 @@ class Player extends StateUtil {
           break;
       }
 
-      let linkedNode = null;
-      const history = [];
-      const visits = [];
+      // 최단거리 구하기
+      function makeRoutes(startField, destField, visited=[]){
+        const routes = [];
+        const path = visited.slice();
+        const linked = (startField.linked||[]);
+        const arrived = (startField.props.uuid === destField.props.uuid);
 
-      // BFS
-      // const queue = [targetField];
-      // while(queue.length > 0){
-      //   const node = queue.shift(); // 맨 앞에서 가져오기
-      //   visits.push(node); // 방문 기록 남기기
-      //   for(let i=0; i<node.linked.length; i++){
-      //     linkedNode = node.linked[i];
-      //     if( !visits.some((node)=>(node === linkedNode)) ){
-      //       queue.push(linkedNode);
-      //       history.push(linkedNode);
-      //     }
-      //   }
-      // }
+        if( !path.some((node)=>(node.props.uuid === startField.props.uuid)) ){
+          path.push(startField);
+        }
 
-      // DFS
-      // function search(node){
-      //   let path = [node];
-      //   for(let i=0; i<node.linked.length; i++){
-      //     const linkedNode = node.linked[i];
-      //     if( !path.some((node)=>(node === linkedNode)) ){
-      //       if( linkedNode.props.uuid === playerField.props.uuid ){
-      //         return path;
-      //       } else {
-      //         // path.push(...search(linkedNode));
-      //       }
-      //     }
-      //   }
-      //   return path;
-      // }
-      // const linkedPath = search(targetField);
-      // console.log(linkedPath?.map((field)=>(field.state.offset)));
-      // console.log(linkedPath?.map((field)=>(field.state.offset)));
-      // console.log(history.length, visits.length);
+        if( arrived ){
+          routes.push({ path: path.slice(), length: path.length });
+        } else {
+          for(let i=0; i < linked.length; i++){
+            const linkedNode = linked[i];
+            if( !path.some((node)=>(node.props.uuid === linkedNode.props.uuid)) ){
+              if( linkedNode.linked?.length > 0 ){
+                const route = makeRoutes(linkedNode, destField, path);
+                if( route?.length > 0 ){
+                  routes.push(...route);
+                }
+              }
+            }
+          }
+        }
+        return routes;
+      }
+
+      const routes = makeRoutes(playerField, targetField, [playerField])
+                    .slice()
+                    .sort((a, b)=>( a.length > b.length ? 1 : -1 ))
+                    .at(0)
+                    .path
+      const nextField = routes[1];
 
       return {
         vector,
-        field: linkedNode,
+        field: nextField,
       };
     }
   }
@@ -484,7 +496,10 @@ class User extends Player {
     });
   }
 
-  move(vector="UP"){
+  move(vector){
+    if( vector === undefined || vector === null ){
+      vector = this.state.aim.vector;
+    }
     const crntField = this.state.field;
     const nextField = crntField.state.link[vector];
     if( nextField instanceof Wall ) {
@@ -517,6 +532,7 @@ class Enermy extends Player {
       type: "enermy",
     }, {
       target: (props.target||[]).slice().shift(), // User Object
+      tried: 0, // 이동시도 횟수
     });
   }
 
@@ -524,25 +540,35 @@ class Enermy extends Player {
     const target = this.state.target; 
     const { vector, field: nextField } = this.findTarget(target);
 
+    if( this.state.stat.health === 0 ){
+      return true;
+    }
+
     const crntField = this.state.field;
-    if( nextField instanceof Wall ) {
-      this.rotate(vector);
-      return false;
-    } else if( nextField instanceof Field ){
+    if( nextField instanceof Field ){
+      if( this.state.tried > 1 ){
+        this.setState("tried", 0);
+        return true;
+      }
+
       const nextFieldHasStand = nextField.state.stand;
       if( nextFieldHasStand ){
+        this.setState("tried", this.state.tried + 1);
         return false;
       }
 
       const { x, y } = nextField.state.offset;
       this.setState("field", nextField);
       this.setState("offset", { x, y });
+      this.setState("tried", 0);
 
       crntField.leave();
       nextField.standOn(this);
-    }
-
+    } else if( nextField instanceof Wall ) {
+      // return false;
+    } 
     this.rotate(vector);
+    return true;
   }
 }
 
@@ -611,6 +637,21 @@ class Field extends StateUtil {
 
   leave(){
     this.setState("stand", null);
+  }
+
+  get linkInfo(){
+    const links = [];
+    const link = this.state.link;
+    Object.keys(link).forEach((key)=>{
+      const linked = link[key];
+      if( linked?.props.type !== "wall" ){
+        links.push({
+          vector: key,
+          linked: linked,
+        });
+      }
+    });
+    return links;
   }
 
   get linked(){
@@ -717,7 +758,30 @@ class Controller extends StateUtil {
     this.unbindEvents();
 
     const events = [];
-    const { onKeyDown } = this.props;
+    const { onInterval, onKeyDown } = this.props;
+    const { interval } = this.props;
+    if( typeof onInterval === 'function' ){
+      events.push({
+        event: "interval",
+        handler: ()=>{
+          window.controllerInterval = setInterval(()=>{
+            onInterval();
+          }, interval || 100);
+        },
+        beforeUnbind: ()=>{
+          return true;
+        },
+        onUnbind: ()=>{
+          if( window.controllerInterval ){
+            clearInterval(window.controllerInterval);
+          }
+          window.controllerInterval = null;
+        },
+        options: {
+          interval: this.props.interval,
+        },
+      });
+    }
     if( typeof onKeyDown === 'function' ){
       window.controllerHandler = (e) => {
         const vector = this.compare(e.keyCode);
@@ -742,13 +806,17 @@ class Controller extends StateUtil {
       });
     }
 
-    events?.forEach(({ event, handler, target, onBind, beforeBind })=>{
+    events?.forEach(({ event, handler, target, onBind, beforeBind, options })=>{
       let doBind = true;
       if( typeof beforeBind === 'function' ){
         doBind = !(beforeBind() === false);
       }
       if( doBind ){
-        target.addEventListener(event, handler);
+        if( event === "interval" ){
+          handler();
+        } else {
+          target.addEventListener(event, handler);
+        }
         if( typeof onBind === 'function' ){
           onBind();
         }
@@ -766,7 +834,11 @@ class Controller extends StateUtil {
         doUnbind = !(beforeUnbind() === false);
       }
       if( doUnbind ){
-        target.removeEventListener(event, handler);
+        if( event === "interval" ){
+          // Pass
+        } else {
+          target.removeEventListener(event, handler);
+        }
         if( typeof onUnbind === 'function' ){
           onUnbind();
         }
@@ -1108,6 +1180,7 @@ class Stage extends StateUtil {
 
     // -> Draw User
     players?.forEach((player)=>{
+      const username = player.props.username;
       const field = player.state.field;
       const { health } = player.state.stat;
       if( health <= 0 ){
@@ -1126,11 +1199,15 @@ class Stage extends StateUtil {
         this.drawer.circle(posX + widthRadius, posY + widthRadius, widthRadius, {
           type: "fill",
           color: "#ffff00",
+          text: username,
+          textColor: "#000000",
         });
       } else {
         this.drawer.circle(posX + widthRadius, posY + widthRadius, widthRadius, {
           type: "fill",
           color: "#2020ff",
+          text: username,
+          textColor: "#000000",
         });
       }
 
@@ -1164,7 +1241,7 @@ class Stage extends StateUtil {
 
       this.drawer.circle(aimX, aimY, aimRadius, {
         type: "fill",
-        color: "#ff0000"
+        color: "#ff0000",
       });
     });
     // <- Draw User
@@ -1192,7 +1269,8 @@ class StageManager extends StateUtil {
       canvas,
       size: {
         maps: [11, 11],
-        field: [50, 50], /** @TODO 숫자로 입력 받도록 처리 */
+        // field: [50, 50], /** @TODO 숫자로 입력 받도록 처리 */
+        field: [15, 15]
       }
     }, {
       stage: null, // Stage
@@ -1213,23 +1291,10 @@ class StageManager extends StateUtil {
     const users = [];
     const enermies = [];
 
-    const u1 = new User({
-      username: "User1",
-    });
-    u1.init();
-    users.push(u1);
-
-    const e1 = new Enermy({
-      target: users,
-    });
-    e1.init();
-    enermies.push(e1);
-
-    // const e2 = new Enermy({
-    //   target: users,
-    // });
-    // e2.init();
-    // enermies.push(e2);
+    const u1 = new User({ username: "U1" }); u1.init(); users.push(u1);
+    const e1 = new Enermy({ username: "E1", target: users }); e1.init(); enermies.push(e1);
+    const e2 = new Enermy({ username: "E2", target: users }); e2.init(); enermies.push(e2);
+    const e3 = new Enermy({ username: "E3", target: users }); e3.init(); enermies.push(e3);
     
     const s1 = new Stage({
       canvas: canvas,
@@ -1256,6 +1321,8 @@ class StageManager extends StateUtil {
         [7, 0], [7, 1], [7, 2], [7, 4], [7, 5], [7, 6], [7, 8], [7, 9], [7, 10],
         [9, 0], [9, 1], [9, 2], [9, 4], [9, 5], [9, 6], [9, 8], [9, 9], [9, 10], 
         [10, 2], [10, 4], [10, 6], [10, 8], 
+        // temp
+        [3, 3], [9, 3], 
       ],
       users: users,
       enermies: enermies,
@@ -1268,6 +1335,22 @@ class StageManager extends StateUtil {
     if( !c1 ){
       c1 = new Controller({
         mode: "wasd",
+        interval: 200,
+        onInterval: () => { // 자동으로 움직임...
+          u1.move();
+
+          const queue = enermies.slice();
+          while(true){
+            const p = queue.shift();
+            const moved = p.move();
+            if( !moved ){
+              queue.push(p);
+            }
+            if( queue.length === 0 ){
+              break;
+            }
+          }
+        },
         onKeyDown: (e, vector, vectors) => {
           e.preventDefault();
           if( vector === "UNKNOWN" ){
@@ -1287,20 +1370,21 @@ class StageManager extends StateUtil {
           }
 
           // 플레이어 이동
-          u1.move(vector);
+          // const moved = u1.move(vector);
 
           // 적 이동
-          enermies.forEach((p)=>(p.move()));
+          // const queue = enermies.slice();
+          // while(true){
+          //   const p = queue.shift();
+          //   const moved = p.move();
+          //   if( !moved ){
+          //     queue.push(p);
+          //   }
+          //   if( queue.length === 0 ){
+          //     break;
+          //   }
+          // }
           return false;
-          
-          const prevField = u1.state.field;
-          const nextField = prevField.state.link[vector];
-          if( nextField ){
-            if( nextField instanceof Wall ){
-              return false;
-            }
-            u1.move(nextField, vector);
-          }
         },
       });
     }
