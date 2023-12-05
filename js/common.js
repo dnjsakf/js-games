@@ -418,9 +418,9 @@ class Player extends StateUtil {
 
   findTarget(target){
     if( target instanceof Player ){
+      /*
       const playerField = this.state.field;
       const targetField = target.state.field;
-
       const { x: x1, y: y1 } = playerField.state.offset;
       const { x: x2, y: y2 } = targetField.state.offset;
 
@@ -443,47 +443,50 @@ class Player extends StateUtil {
           vector = ( angle >= 45 ? "DOWN" : "RIGHT" );
           break;
       }
+      */
 
       // 최단거리 구하기
-      function makeRoutes(startField, destField, visited=[]){
-        const routes = [];
+      function findPath(startField, destField, visited=[], vector){
+        const paths = [];
         const path = visited.slice();
-        const linked = (startField.linked||[]);
+        const linked = (startField.linkInfo||[]);
         const arrived = (startField.props.uuid === destField.props.uuid);
 
-        if( !path.some((node)=>(node.props.uuid === startField.props.uuid)) ){
-          path.push(startField);
+        if( !path.some(({ field })=>(field.props.uuid === startField.props.uuid)) ){
+          path.push({
+            vector: vector,
+            field: startField,
+          });
         }
 
         if( arrived ){
-          routes.push({ path: path.slice(), length: path.length });
+          paths.push({ path: path.slice(), length: path.length });
         } else {
           for(let i=0; i < linked.length; i++){
-            const linkedNode = linked[i];
-            if( !path.some((node)=>(node.props.uuid === linkedNode.props.uuid)) ){
-              if( linkedNode.linked?.length > 0 ){
-                const route = makeRoutes(linkedNode, destField, path);
+            const { vector, field: linkedField } = linked[i];
+            if( !path.some(({ field })=>(field.props.uuid === linkedField.props.uuid)) ){
+              if( linkedField.linkInfo?.length > 0 ){
+                const route = findPath(linkedField, destField, path, vector);
                 if( route?.length > 0 ){
-                  routes.push(...route);
+                  paths.push(...route);
                 }
               }
             }
           }
         }
-        return routes;
+        return paths.slice();
       }
 
-      const routes = makeRoutes(playerField, targetField, [playerField])
-                    .slice()
+      const playerField = this.state.field;
+      const targetField = target.state.field;
+      const paths = findPath(playerField, targetField, [])
                     .sort((a, b)=>( a.length > b.length ? 1 : -1 ))
                     .at(0)
-                    .path
-      const nextField = routes[1];
+                    .path;
+                    
+      const nextPath = paths[paths.length > 1 ? 1 : 0];
 
-      return {
-        vector,
-        field: nextField,
-      };
+      return nextPath;
     }
   }
 }
@@ -647,7 +650,7 @@ class Field extends StateUtil {
       if( linked?.props.type !== "wall" ){
         links.push({
           vector: key,
-          linked: linked,
+          field: linked,
         });
       }
     });
